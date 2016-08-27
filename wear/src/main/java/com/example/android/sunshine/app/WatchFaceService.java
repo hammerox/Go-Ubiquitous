@@ -21,11 +21,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -91,6 +94,9 @@ public class WatchFaceService extends CanvasWatchFaceService {
         Paint mBackgroundPaint;
         Paint mTimePaint;
         Paint mDatePaint;
+        Bitmap mWeatherIcon;
+        Paint mHighPaint;
+        Paint mLowPaint;
         boolean mAmbient;
         Time mTime;
         Calendar calendar;
@@ -107,6 +113,10 @@ public class WatchFaceService extends CanvasWatchFaceService {
         float mXOffset;
         float mYTimeOffset;
         float mYDateOffset;
+        float mYInfoOffset;
+
+        String mDefaultHigh = "40\u00B0";
+        String mDefaultLow = "10\u00B0";
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -129,6 +139,7 @@ public class WatchFaceService extends CanvasWatchFaceService {
             Resources resources = WatchFaceService.this.getResources();
             mYTimeOffset = resources.getDimension(R.dimen.digital_y_time_offset);
             mYDateOffset = resources.getDimension(R.dimen.digital_y_date_offset);
+            mYInfoOffset = resources.getDimension(R.dimen.digital_y_info_offset);
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
@@ -142,6 +153,16 @@ public class WatchFaceService extends CanvasWatchFaceService {
             mDatePaint.setColor(resources.getColor(R.color.digital_text_light));
             mDatePaint.setTypeface(NORMAL_TYPEFACE);
             mDatePaint.setAntiAlias(true);
+
+            mHighPaint = new Paint();
+            mHighPaint.setColor(resources.getColor(R.color.digital_text));
+            mHighPaint.setTypeface(NORMAL_TYPEFACE);
+            mHighPaint.setAntiAlias(true);
+
+            mLowPaint = new Paint();
+            mLowPaint.setColor(resources.getColor(R.color.digital_text_light));
+            mLowPaint.setTypeface(NORMAL_TYPEFACE);
+            mLowPaint.setAntiAlias(true);
 
             mTime = new Time();
         }
@@ -202,6 +223,8 @@ public class WatchFaceService extends CanvasWatchFaceService {
 
             mTimePaint.setTextSize(textSize);
             mDatePaint.setTextSize(textSize/3);
+            mHighPaint.setTextSize(textSize/1.3f);
+            mLowPaint.setTextSize(textSize/1.3f);
         }
 
         @Override
@@ -254,6 +277,22 @@ public class WatchFaceService extends CanvasWatchFaceService {
                 String dateText = mDateFormat.format(calendar.getTime()).toUpperCase();
                 canvas.drawText(dateText, bounds.centerX() - (mDatePaint.measureText(dateText))/2,
                         mYDateOffset, mDatePaint);
+
+                if (mWeatherIcon == null) {
+                    Drawable b = getResources().getDrawable(R.drawable.ic_clear);
+                    Bitmap icon = ((BitmapDrawable) b).getBitmap();
+                    float scaledWidth = (mHighPaint.getTextSize() / icon.getHeight()) * icon.getWidth();
+                    mWeatherIcon = Bitmap.createScaledBitmap(icon, (int) scaledWidth, (int) mHighPaint.getTextSize(), true);
+                }
+
+                float iconXOffset = bounds.centerX() - (mHighPaint.measureText(mDefaultHigh))/2 - (mWeatherIcon.getWidth() + 30);
+                canvas.drawBitmap(mWeatherIcon, iconXOffset, mYInfoOffset - mWeatherIcon.getHeight() + 10, null);
+
+                canvas.drawText(mDefaultHigh, bounds.centerX() - (mHighPaint.measureText(mDefaultHigh))/2,
+                        mYInfoOffset, mHighPaint);
+
+                canvas.drawText(mDefaultLow, bounds.centerX() + (mHighPaint.measureText(mDefaultHigh))/2 + 20,
+                        mYInfoOffset, mLowPaint);
             }
         }
 
