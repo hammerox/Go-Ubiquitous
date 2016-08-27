@@ -38,7 +38,6 @@ import android.view.WindowInsets;
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
-import java.util.Date;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -90,7 +89,8 @@ public class WatchFaceService extends CanvasWatchFaceService {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
-        Paint mTextPaint;
+        Paint mTimePaint;
+        Paint mDatePaint;
         boolean mAmbient;
         Time mTime;
         Calendar calendar;
@@ -105,7 +105,8 @@ public class WatchFaceService extends CanvasWatchFaceService {
             }
         };
         float mXOffset;
-        float mYOffset;
+        float mYTimeOffset;
+        float mYDateOffset;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -126,13 +127,21 @@ public class WatchFaceService extends CanvasWatchFaceService {
                     .setShowSystemUiTime(false)
                     .build());
             Resources resources = WatchFaceService.this.getResources();
-            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
+            mYTimeOffset = resources.getDimension(R.dimen.digital_y_time_offset);
+            mYDateOffset = resources.getDimension(R.dimen.digital_y_date_offset);
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
 
-            mTextPaint = new Paint();
-            mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mTimePaint = new Paint();
+            mTimePaint.setColor(resources.getColor(R.color.digital_text));
+            mTimePaint.setTypeface(NORMAL_TYPEFACE);
+            mTimePaint.setAntiAlias(true);
+
+            mDatePaint = new Paint();
+            mDatePaint.setColor(resources.getColor(R.color.digital_text_light));
+            mDatePaint.setTypeface(NORMAL_TYPEFACE);
+            mDatePaint.setAntiAlias(true);
 
             mTime = new Time();
         }
@@ -141,14 +150,6 @@ public class WatchFaceService extends CanvasWatchFaceService {
         public void onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
             super.onDestroy();
-        }
-
-        private Paint createTextPaint(int textColor) {
-            Paint paint = new Paint();
-            paint.setColor(textColor);
-            paint.setTypeface(NORMAL_TYPEFACE);
-            paint.setAntiAlias(true);
-            return paint;
         }
 
         @Override
@@ -199,7 +200,8 @@ public class WatchFaceService extends CanvasWatchFaceService {
             float textSize = resources.getDimension(isRound
                     ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
 
-            mTextPaint.setTextSize(textSize);
+            mTimePaint.setTextSize(textSize);
+            mDatePaint.setTextSize(textSize/3);
         }
 
         @Override
@@ -220,7 +222,7 @@ public class WatchFaceService extends CanvasWatchFaceService {
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
-                    mTextPaint.setAntiAlias(!inAmbientMode);
+                    mTimePaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -246,7 +248,13 @@ public class WatchFaceService extends CanvasWatchFaceService {
             String text = mAmbient
                     ? mTimeAmbientFormat.format(calendar.getTime())
                     : mTimeFormat.format(calendar.getTime());
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            canvas.drawText(text, mXOffset, mYTimeOffset, mTimePaint);
+
+            if (!mAmbient) {
+                String dateText = mDateFormat.format(calendar.getTime()).toUpperCase();
+                canvas.drawText(dateText, bounds.centerX() - (mDatePaint.measureText(dateText))/2,
+                        mYDateOffset, mDatePaint);
+            }
         }
 
         /**
