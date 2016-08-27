@@ -32,16 +32,32 @@ import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
+import com.google.android.gms.wearable.Wearable;
 
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -88,21 +104,39 @@ public class WatchFaceService extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
+    private class Engine extends CanvasWatchFaceService.Engine
+    implements DataApi.DataListener,
+            GoogleApiClient.ConnectionCallbacks,
+            GoogleApiClient.OnConnectionFailedListener {
+
+        public static final String TAG = "WatchFaceService.Engine";
+
+        public static final String WEARABLE_UPDATE_PATH = "/wearable_update";
+        public static final String WEARABLE_REQUEST_PATH = "/wearable_request";
+        public static final String WEARABLE_WEATHER_ID = "wearable_weather_id";
+        public static final String WEARABLE_HIGH = "wearable_high";
+        public static final String WEARABLE_LOW = "wearable_low";
+
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
+
         Paint mBackgroundPaint;
         Paint mTimePaint;
         Paint mDatePaint;
         Bitmap mWeatherIcon;
         Paint mHighPaint;
         Paint mLowPaint;
+
+        String mHighText;
+        String mLowText;
+
         boolean mAmbient;
         Time mTime;
         Calendar calendar;
         SimpleDateFormat mTimeAmbientFormat = new SimpleDateFormat("hh:mm");
         SimpleDateFormat mTimeFormat = new SimpleDateFormat("hh:mm:ss");
         SimpleDateFormat mDateFormat = new SimpleDateFormat("EEE, MMM dd yyyy");
+
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -110,13 +144,18 @@ public class WatchFaceService extends CanvasWatchFaceService {
                 mTime.setToNow();
             }
         };
+
+        GoogleApiClient mGoogleApiClient = new GoogleApiClient.Builder(WatchFaceService.this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(Wearable.API)
+                .build();
+
         float mXOffset;
         float mYTimeOffset;
         float mYDateOffset;
         float mYInfoOffset;
 
-        String mDefaultHigh = "40\u00B0";
-        String mDefaultLow = "10\u00B0";
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -199,6 +238,8 @@ public class WatchFaceService extends CanvasWatchFaceService {
             mRegisteredTimeZoneReceiver = true;
             IntentFilter filter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
             WatchFaceService.this.registerReceiver(mTimeZoneReceiver, filter);
+
+            mGoogleApiClient.connect();
         }
 
         private void unregisterReceiver() {
@@ -207,6 +248,11 @@ public class WatchFaceService extends CanvasWatchFaceService {
             }
             mRegisteredTimeZoneReceiver = false;
             WatchFaceService.this.unregisterReceiver(mTimeZoneReceiver);
+
+            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+                Wearable.DataApi.removeListener(mGoogleApiClient, this);
+                mGoogleApiClient.disconnect();
+            }
         }
 
         @Override
@@ -278,21 +324,17 @@ public class WatchFaceService extends CanvasWatchFaceService {
                 canvas.drawText(dateText, bounds.centerX() - (mDatePaint.measureText(dateText))/2,
                         mYDateOffset, mDatePaint);
 
-                if (mWeatherIcon == null) {
-                    Drawable b = getResources().getDrawable(R.drawable.ic_clear);
-                    Bitmap icon = ((BitmapDrawable) b).getBitmap();
-                    float scaledWidth = (mHighPaint.getTextSize() / icon.getHeight()) * icon.getWidth();
-                    mWeatherIcon = Bitmap.createScaledBitmap(icon, (int) scaledWidth, (int) mHighPaint.getTextSize(), true);
+                if (mHighText != null || mLowText != null || mWeatherIcon != null) {
+                    canvas.drawText(mHighText, bounds.centerX() - (mHighPaint.measureText(mHighText)) / 2,
+                            mYInfoOffset, mHighPaint);
+
+                    canvas.drawText(mLowText, bounds.centerX() + (mHighPaint.measureText(mHighText))/2 + 20,
+                            mYInfoOffset, mLowPaint);
+
+                    float iconXOffset = bounds.centerX() - (mHighPaint.measureText(mHighText))/2 - (mWeatherIcon.getWidth() + 30);
+                    canvas.drawBitmap(mWeatherIcon, iconXOffset, mYInfoOffset - mWeatherIcon.getHeight() + 10, null);
+
                 }
-
-                float iconXOffset = bounds.centerX() - (mHighPaint.measureText(mDefaultHigh))/2 - (mWeatherIcon.getWidth() + 30);
-                canvas.drawBitmap(mWeatherIcon, iconXOffset, mYInfoOffset - mWeatherIcon.getHeight() + 10, null);
-
-                canvas.drawText(mDefaultHigh, bounds.centerX() - (mHighPaint.measureText(mDefaultHigh))/2,
-                        mYInfoOffset, mHighPaint);
-
-                canvas.drawText(mDefaultLow, bounds.centerX() + (mHighPaint.measureText(mDefaultHigh))/2 + 20,
-                        mYInfoOffset, mLowPaint);
             }
         }
 
@@ -326,6 +368,92 @@ public class WatchFaceService extends CanvasWatchFaceService {
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
+        }
+
+        @Override
+        public void onConnected(@Nullable Bundle bundle) {
+            Wearable.DataApi.addListener(mGoogleApiClient, Engine.this);
+            requestWeatherInfo();
+        }
+
+        @Override
+        public void onDataChanged(DataEventBuffer dataEventBuffer) {
+            for (DataEvent dataEvent : dataEventBuffer) {
+                if (dataEvent.getType() == DataEvent.TYPE_CHANGED) {
+                    DataMap dataMap = DataMapItem.fromDataItem(dataEvent.getDataItem()).getDataMap();
+                    String path = dataEvent.getDataItem().getUri().getPath();
+                    Log.d(TAG, path);
+                    if (path.equals(WEARABLE_UPDATE_PATH)) {
+                        mHighText = dataMap.getString(WEARABLE_HIGH);
+                        mLowText = dataMap.getString(WEARABLE_LOW);
+
+                        int weatherId = dataMap.getInt(WEARABLE_WEATHER_ID);
+                        Drawable b = getResources().getDrawable(getIcon(weatherId));
+                        Bitmap icon = ((BitmapDrawable) b).getBitmap();
+                        float scaledWidth = (mHighPaint.getTextSize() / icon.getHeight()) * icon.getWidth();
+                        mWeatherIcon = Bitmap.createScaledBitmap(icon, (int) scaledWidth, (int) mHighPaint.getTextSize(), true);
+
+                        invalidate();
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void onConnectionSuspended(int i) {
+
+        }
+
+        @Override
+        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+        }
+
+        public void requestWeatherInfo() {
+            PutDataMapRequest putDataMapRequest = PutDataMapRequest.create(WEARABLE_REQUEST_PATH);
+            putDataMapRequest.getDataMap().putString("uuid", UUID.randomUUID().toString());
+            PutDataRequest request = putDataMapRequest.asPutDataRequest();
+
+            Wearable.DataApi.putDataItem(mGoogleApiClient, request)
+                    .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
+                        @Override
+                        public void onResult(DataApi.DataItemResult dataItemResult) {
+                            if (!dataItemResult.getStatus().isSuccess()) {
+                                Log.d(TAG, "Failed asking phone for weather data");
+                            } else {
+                                Log.d(TAG, "Successfully asked for weather data");
+                            }
+                        }
+                    });
+        }
+
+        public int getIcon(int weatherId) {
+            // Based on weather code data found at:
+            // http://bugs.openweathermap.org/projects/api/wiki/Weather_Condition_Codes
+            if (weatherId >= 200 && weatherId <= 232) {
+                return R.drawable.ic_storm;
+            } else if (weatherId >= 300 && weatherId <= 321) {
+                return R.drawable.ic_light_rain;
+            } else if (weatherId >= 500 && weatherId <= 504) {
+                return R.drawable.ic_rain;
+            } else if (weatherId == 511) {
+                return R.drawable.ic_snow;
+            } else if (weatherId >= 520 && weatherId <= 531) {
+                return R.drawable.ic_rain;
+            } else if (weatherId >= 600 && weatherId <= 622) {
+                return R.drawable.ic_snow;
+            } else if (weatherId >= 701 && weatherId <= 761) {
+                return R.drawable.ic_fog;
+            } else if (weatherId == 761 || weatherId == 781) {
+                return R.drawable.ic_storm;
+            } else if (weatherId == 800) {
+                return R.drawable.ic_clear;
+            } else if (weatherId == 801) {
+                return R.drawable.ic_light_clouds;
+            } else if (weatherId >= 802 && weatherId <= 804) {
+                return R.drawable.ic_cloudy;
+            }
+            return -1;
         }
     }
 }
